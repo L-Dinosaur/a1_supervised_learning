@@ -1,4 +1,5 @@
 data_path: '../data/marketing_campaign.csv'
+model_save_path_base: '../output/customer'
 models: ['neural_net', 'svm', 'knn']
 neural_net:
   solver: 'adam'
