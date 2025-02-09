@@ -3,8 +3,11 @@ from data_processing import *
 import pandas as pd
 import numpy as np
 from sklearn.neural_network import MLPClassifier
+import joblib
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import KFold, cross_val_score, cross_validate, train_test_split
+from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.model_selection import GridSearchCV, train_test_split
 
 
 class CustomerPersonality(object):
@@ -14,9 +17,7 @@ class CustomerPersonality(object):
         self.df = None
         with open('../config/customer_personality.yaml', 'r') as strm:
             self.config = yaml.safe_load(strm)
-        self.neural_net = None
-        self.svm = None
-        self.knn = None
+        self.models = {}
         self.X = None
         self.y = None
         self.X_train_val = None
@@ -27,6 +28,9 @@ class CustomerPersonality(object):
         self.y_test = None
         self.train_idx = []
         self.val_idx = []
+        self.neural_net_config = self.config['neural_net']
+        self.svm_config = self.config['svm']
+        self.knn_config = self.config['knn']
 
     def process_data(self):
         self.df = pd.read_csv(self.config['data_path'], delimiter='\t')
@@ -42,53 +46,86 @@ class CustomerPersonality(object):
 
         # Marital Status
         self.df = self.df[~self.df['Marital_Status'].isin(['Absurd', 'YOLO'])]
+        self.df.loc[self.df['Marital_Status'] == 'Together', 'Marital_Status'] = 'Married'
+        self.df.loc[self.df['Marital_Status'] == 'Alone', 'Marital_Status'] = 'Single'
 
         # Step 2: Normalize Features
         self.df['Age'] = 2025 - self.df['Year_Birth']
         self.df.drop(['Year_Birth'], axis=1, inplace=True)
-        # self.df.loc[:, 'Age'] = normalize(self.df['Age'])
-
-        # self.df.loc[:, 'Income'] = normalize(self.df['Income'])
 
         self.df['Tenure'] = (pd.to_datetime('2025-02-08') - pd.to_datetime(self.df['Dt_Customer'])).dt.days
-        # self.df.loc[:, 'Tenure'] = normalize(self.df['Tenure'])
-
-        # self.df.loc[self.df['Recency'] == 0, 'Recency'] = 1
-        # self.df.loc[:, 'Recency'] = inverse_normalize(self.df['Recency'])
-
-        # self.df.loc[:, 'MntWines'] = normalize(self.df['MntWines'])
-        # self.df.loc[:, 'MntFruits'] = normalize(self.df['MntFruits'])
-        # self.df.loc[:, 'MntMeatProducts'] = normalize(self.df['MntMeatProducts'])
-        # self.df.loc[:, 'MntFishProducts'] = normalize(self.df['MntFishProducts'])
-        # self.df.loc[:, 'MntSweetProducts'] = normalize(self.df['MntSweetProducts'])
-        # self.df.loc[:, 'NumDealsPurchases'] = normalize(self.df['NumDealsPurchases'])
-        # self.df.loc[:, 'NumWebPurchases'] = normalize(self.df['NumWebPurchases'])
-        # self.df.loc[:, 'NumCatalogPurchases'] = normalize(self.df['NumCatalogPurchases'])
-        # self.df.loc[:, 'NumStorePurchases'] = normalize(self.df['NumStorePurchases'])
-        # self.df.loc[:, 'NumWebVisitsMonth'] = normalize(self.df['NumWebVisitsMonth'])
-        # self.df.loc[:, 'MntGoldProds'] = normalize(self.df['MntGoldProds'])
+        self.df.drop(['Dt_Customer'], axis=1, inplace=True)
 
         summarize_df(self.df)
 
-        self.X = self.df.drop(['Response'], axis=1)
+        self.X = pd.get_dummies(self.df.drop(['Response'], axis=1), columns=['Education', 'Marital_Status'])
         self.y = self.df['Response']
 
-        x_train_val, self.X_test, y_train_val, self.y_test = train_test_split(self.X, self.y)
+        self.X_train_val, self.X_test, self.y_train_val, self.y_test = train_test_split(self.X, self.y)
 
-        kf = KFold(n_splits=5, shuffle=True)
-        for fold, (train_idx, val_idx) in enumerate(kf.split(x_train_val)):
-            self.train_idx[fold] = train_idx
-            self.val_idx[fold] = val_idx
+        scaler = StandardScaler()
+        self.X_train_val = scaler.fit_transform(self.X_train_val)
+        self.X_test = scaler.transform(self.X_test)
+
+        joblib.dump(scaler, 'scaler.pkl')
 
     def set_up_model(self):
-        self.neural_net = MLPClassifier(**self.neural_net_config)
+        if 'neural_net' in self.config['models']:
+            self.models['neural_net'] = MLPClassifier(**self.neural_net_config)
+        if 'svm' in self.config['models']:
+            self.models['svm'] = SVC(**self.svm_config)
+        if 'knn' in self.config['models']:
+            self.models['knn'] = KNeighborsClassifier(**self.knn_config)
 
-    def run(self):
-        # Neural Network
+    def train(self):
+        # Neural Net
+        nn_param_grid = {'hidden_layer_sizes': [(25,), (50,), (100,), (50, 50), (50, 50, 50)],
+                         'alpha': np.logspace(-3, 3, 7),
+                         'activation': ['relu', 'logistic']}
+        nn_gs = GridSearchCV(
+            self.models['neural_net'],
+            param_grid=nn_param_grid,
+            cv=5,
+            n_jobs=1,
+            scoring='accuracy',
+            verbose=1
+        )
 
-        print('run')
+        nn_gs.fit(self.X_train_val, self.y_train_val)
+        joblib.dump(nn_gs, 'nn_model_grid_search.pkl')
+
+        # SVM
+        svm_param_grid = {'C': np.logspace(-3, 3, 7),
+                          'gamma': np.logspace(-3, 3, 7),
+                          'kernel': ['rbf', 'sigmoid']}
+        svm_gs = GridSearchCV(
+            self.models['svm'],
+            param_grid=svm_param_grid,
+            cv=5,
+            n_jobs=1,
+            verbose=1
+        )
+
+        svm_gs.fit(self.X_train_val, self.y_train_val)
+        joblib.dump(svm_gs, 'svm_model_grid_search.pkl')
+
+        # KNN
+        knn_grid = {'n_neighbors': [3, 5, 7, 9, 11, 13, 15]}
+        knn_gs = GridSearchCV(
+            self.models['knn'],
+            param_grid=knn_grid,
+            cv=5,
+            n_jobs=1,
+            verbose=1
+        )
+
+        knn_gs.fit(self.X_train_val, self.y_train_val)
+
+        joblib.dump(knn_gs, 'knn_model_grid_search.pkl')
 
 
 if __name__ == '__main__':
     cp = CustomerPersonality()
     cp.process_data()
+    cp.set_up_model()
+    cp.train()

@@ -1,1 +1,12 @@
 data_path: '../data/marketing_campaign.csv'
+models: ['neural_net', 'svm', 'knn']
+neural_net:
+  solver: 'adam'
+  max_iter: 5000
+  early_stopping: True
+svm:
+  max_iter: 5000
+knn:
+  weights: 'uniform'
+  metric: 'minkowski'
+  p: 2
