@@ -1,18 +1,18 @@
-data_path: '../data/marketing_campaign.csv'
-model_save_path_base: '../output/customer'
+data_path: '../data/spotify-2023.csv'
+model_save_path_base: '../output/spotify'
 models: ['neural_net', 'svm', 'knn']
 cv:
   n_splits: 5
   shuffle: True
-  random_state: 329
+  random_state: 126
 neural_net:
   solver: 'adam'
   max_iter: 5000
   early_stopping: True
-  random_state: 329
+  random_state: 126
 svm:
   max_iter: 5000
-  random_state: 329
+  random_state: 126
 knn:
   weights: 'uniform'
   metric: 'minkowski'

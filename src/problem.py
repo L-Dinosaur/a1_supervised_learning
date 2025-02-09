@@ -1,13 +1,11 @@
 import yaml
-from data_processing import *
 import pandas as pd
-import numpy as np
 from sklearn.neural_network import MLPClassifier
 import joblib
-from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 from sklearn.neighbors import KNeighborsClassifier
-from sklearn.model_selection import GridSearchCV, train_test_split
+from sklearn.model_selection import GridSearchCV, learning_curve, validation_curve
+from sklearn.metrics import confusion_matrix, classification_report
 import os
 
 
@@ -54,6 +52,8 @@ class MLProblem(object):
         self.svm_param_grid = {}
         self.knn_param_grid = {}
 
+        self.cv_splitter = None
+
         # self.nn_param_grid = self.config['neural_net_param_grid']
         # self.svm_param_grid = self.config['svm_param_grid']
         # self.knn_param_grid = self.config['knn_param_grid']
@@ -82,38 +82,162 @@ class MLProblem(object):
         self.nn_gs = GridSearchCV(
             self.nn,
             param_grid=self.nn_param_grid,
-            cv=5,
+            cv=self.cv_splitter,
             n_jobs=1,
             scoring='accuracy',
             verbose=1
         )
 
         self.nn_gs.fit(self.X_train_val, self.y_train_val)
+        self.nn = self.nn_gs.best_estimator_
         joblib.dump(self.nn_gs, os.path.join(self.model_save_path, 'neural_net_gridsearch.pkl'))
 
         self.svm_gs = GridSearchCV(
             self.svm,
             param_grid=self.svm_param_grid,
-            cv=5,
+            cv=self.cv_splitter,
             n_jobs=1,
             scoring='accuracy',
-            verbose=1
+            verbose=1,
         )
         self.svm_gs.fit(self.X_train_val, self.y_train_val)
         joblib.dump(self.svm_gs, os.path.join(self.model_save_path, 'svm_gridsearch.pkl'))
+        self.svm = self.svm_gs.best_estimator_
 
         self.knn_gs = GridSearchCV(
             self.knn,
             param_grid=self.knn_param_grid,
-            cv=5,
+            cv=self.cv_splitter,
             n_jobs=1,
             scoring='accuracy',
-            verbose=1
+            verbose=1,
         )
         self.knn_gs.fit(self.X_train_val, self.y_train_val)
         joblib.dump(self.knn_gs, os.path.join(self.model_save_path, 'knn_gridsearch.pkl'))
+        self.knn = self.knn_gs.best_estimator_
 
-    # def testing(self):
-    #     # Neural Net
-    #
-    #     nn_y_pred =
+    def test(self):
+        # Neural Net
+        print('Performance Evaluation:')
+
+        print(f'Neural Network with parameters {self.nn_gs.best_params_}')
+        nn_y_pred = self.nn.predict(self.X_test)
+        print('Classification Report:')
+        nn_report = classification_report(self.y_test, nn_y_pred)
+        print(nn_report)
+
+        nn_confusion = confusion_matrix(self.y_test, nn_y_pred)
+        print('Confusion Matrix:')
+        print(nn_confusion)
+
+        # SVM
+        print(f'SVM with parameters {self.svm_gs.best_params_}')
+        svm_y_pred = self.svm.predict(self.X_test)
+        print('Classification Report:')
+        svm_report = classification_report(self.y_test, svm_y_pred)
+        print(svm_report)
+
+        svm_confusion = confusion_matrix(self.y_test, svm_y_pred)
+        print('Confusion Matrix:')
+        print(svm_confusion)
+
+        # KNN
+        print(f'K Nearest Neighbors with parameters {self.knn_gs.best_params_}')
+        knn_y_pred = self.knn.predict(self.X_test)
+        print('Classification Report:')
+        knn_report = classification_report(self.y_test, knn_y_pred)
+        print(knn_report)
+
+        knn_confusion = confusion_matrix(self.y_test, knn_y_pred)
+        print('Confusion Matrix:')
+        print(knn_confusion)
+
+    def learning_curve(self, training_size):
+        # Learning Curve
+        # Neural Net
+        train_sizes, nn_train_scores, nn_val_scores = learning_curve(
+            self.nn,
+            self.X_train_val,
+            self.y_train_val,
+            train_sizes=training_size,
+            n_jobs=1,
+            shuffle=True,
+            random_state=329
+        )
+        nn_learning_curve_df = pd.DataFrame(nn_train_scores, index=train_sizes)
+        nn_val_curve_df = pd.DataFrame(nn_val_scores)
+        nn_val_curve_df.to_csv(self.model_save_path + '/val_curve_general_nn.csv')
+        nn_learning_curve_df.to_csv(self.model_save_path + '/learning_curve_nn.csv')
+
+        # SVM
+        train_sizes, svm_train_scores, svm_val_scores = learning_curve(
+            self.svm,
+            self.X_train_val,
+            self.y_train_val,
+            train_sizes=training_size,
+            n_jobs=1,
+            shuffle=True,
+            random_state=329
+        )
+        svm_learning_curve_df = pd.DataFrame(svm_train_scores, index=train_sizes)
+        svm_val_curve_df = pd.DataFrame(svm_val_scores)
+        svm_val_curve_df.to_csv(self.model_save_path + '/val_curve_general_svm.csv')
+        svm_learning_curve_df.to_csv(self.model_save_path + '/learning_curve_svm.csv')
+
+        # K Nearest Neighbors
+        train_sizes, knn_train_scores, knn_val_scores = learning_curve(
+            self.knn,
+            self.X_train_val,
+            self.y_train_val,
+            train_sizes=training_size,
+            n_jobs=1,
+            shuffle=True,
+            random_state=329
+        )
+        knn_learning_curve_df = pd.DataFrame(knn_train_scores, index=train_sizes)
+        knn_val_curve_df = pd.DataFrame(knn_val_scores)
+        knn_val_curve_df.to_csv(self.model_save_path + '/val_curve_general_knn.csv')
+        knn_learning_curve_df.to_csv(self.model_save_path + '/learning_curve_knn.csv')
+
+    def validation_curve(self):
+        # Neural Net
+        for pname, prange in self.nn_param_grid.items():
+            train_scores, val_scores = validation_curve(
+                estimator=self.nn,
+                X=self.X_train_val,
+                y=self.y_train_val,
+                param_name=pname,
+                param_range=prange,
+                cv=self.cv_splitter,
+                scoring='accuracy'
+            )
+            nn_val_curve = pd.DataFrame(val_scores, index=prange)
+            nn_val_curve.to_csv(self.model_save_path + f'/nn_{pname}_val_curve.csv')
+
+        # SVM
+        for pname, prange in self.svm_param_grid.items():
+            train_scores, val_scores = validation_curve(
+                estimator=self.svm,
+                X=self.X_train_val,
+                y=self.y_train_val,
+                param_name=pname,
+                param_range=prange,
+                cv=self.cv_splitter,
+                scoring='accuracy'
+            )
+            svm_val_curve = pd.DataFrame(val_scores, index=prange)
+            svm_val_curve.to_csv(self.model_save_path + f'/svm_{pname}_val_curve.csv')
+
+        # Neural Net
+        for pname, prange in self.knn_param_grid.items():
+            train_scores, val_scores = validation_curve(
+                estimator=self.knn,
+                X=self.X_train_val,
+                y=self.y_train_val,
+                param_name=pname,
+                param_range=prange,
+                cv=self.cv_splitter,
+                scoring='accuracy'
+            )
+            knn_val_curve = pd.DataFrame(val_scores, index=prange)
+            knn_val_curve.to_csv(self.model_save_path + f'/knn_{pname}_val_curve.csv')
